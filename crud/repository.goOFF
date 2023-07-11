@@ -1,0 +1,37 @@
+package crud
+
+type QueryParamsModel struct {
+}
+
+type dataRepo []struct {
+}
+
+type CrudRepo[T Model] interface {
+	readMany(params QueryParamsModel) ([]T, error)
+	readOne(params QueryParamsModel) (T, error)
+	updateOne(params QueryParamsModel) (T, error)
+	deleteOne(params QueryParamsModel) (T, error)
+}
+
+type crudGormDB[T Model] struct {
+}
+
+func (orm *crudGormDB[T]) readMany(params QueryParamsModel) ([]T, error) {
+
+	return []T{}, nil
+}
+
+func (orm *crudGormDB[T]) readOne(params QueryParamsModel) (T, error) {
+
+	return *new(T), nil
+}
+
+func (orm *crudGormDB[T]) updateOne(params QueryParamsModel) (T, error) {
+
+	return *new(T), nil
+}
+
+func (orm *crudGormDB[T]) deleteOne(params QueryParamsModel) (T, error) {
+
+	return *new(T), nil
+}

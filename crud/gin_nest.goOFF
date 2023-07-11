@@ -1,0 +1,123 @@
+package crud
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+type crudNest[TParent Model, TChild Model] struct {
+	CRud[TParent]
+	stubC               *TChild
+	router              gin.IRouter
+	db                  *gorm.DB
+	model               *gorm.DB
+	lcmodelname         string
+	idparamname         string
+	responser           Responser[TParent]
+	errResponser        ErrorResponser
+	ReadManyBeforeFind1 func(*gorm.DB) *gorm.DB
+}
+
+func CrudNest[TParent Model, TChild Model](router gin.IRouter, childCrud ICrud, crudOpt ...CrudOpt) crudNest[TParent, TChild] {
+	modelStub := new(TParent)
+	modelName := getName(*modelStub)
+	routeName := strings.ToLower(modelName)
+
+	modelStubC := new(TChild)
+	modelNameC := getName(*modelStubC)
+	routeNameC := strings.ToLower(modelNameC)
+
+	db := LoadGormDB()
+	cn := crudNest[TParent, TChild]{
+		CRud: CRud[TParent]{
+			lcmodelname:  routeName,
+			idparamname:  routeName + "_id",
+			router:       router,
+			stub:         modelStub,
+			db:           db,
+			model:        db.Model(modelStub),
+			responser:    NewResponseRegistry[TParent](),
+			errResponser: NewErrResponseRegistry(),
+		},
+		db:           db,
+		lcmodelname:  routeNameC,
+		idparamname:  routeNameC + "_id",
+		router:       router,
+		model:        db.Model(modelStubC),
+		stubC:        modelStubC,
+		responser:    NewResponseRegistry[TParent](),
+		errResponser: NewErrResponseRegistry(),
+	}
+	//cn.cRud.CrudRouter(router)
+	cn.CrudRouter(cn.CRud.router)
+	return cn
+}
+func (cn *crudNest[TParent, TChild]) CrudRouter(router gin.IRouter) {
+	rg := router.Group(fmt.Sprintf("/%s", cn.CRud.lcmodelname))
+	rg.GET("/", cn.CRud.readMany)
+	rg.POST("/", cn.CRud.createOne)
+	rg.GET(fmt.Sprintf("/:%s", cn.CRud.idparamname), cn.readOne)
+	rg.PATCH(fmt.Sprintf("/:%s", cn.CRud.idparamname), cn.updateOne)
+	rg.DELETE(fmt.Sprintf("/:%s", cn.CRud.idparamname), cn.deleteOne)
+
+	//one child
+	child := rg.Group(fmt.Sprintf("/:%s/%s", cn.CRud.idparamname, cn.lcmodelname))
+	child.GET("/", cn.readMany)
+	child.POST("/", cn.createOne)
+	child.GET(fmt.Sprintf("/:%s", cn.idparamname), cn.readOne)
+	child.PATCH(fmt.Sprintf("/:%s", cn.idparamname), cn.updateOne)
+	child.DELETE(fmt.Sprintf("/:%s", cn.idparamname), cn.deleteOne)
+
+}
+
+func (cn *crudNest[TParent, TChild]) createOne(ctx *gin.Context) {
+	var body TParent
+	if err := ctx.ShouldBind(&body); err != nil {
+		errBody := cn.errResponser.Match(err)
+		ctx.JSON(400, errBody)
+		return
+	}
+	result := cn.model.Clauses(clause.Returning{}).Create(&body)
+	if result.Error != nil {
+		errBody := cn.errResponser.Match(result.Error)
+		ctx.JSON(int(errBody.Code), errBody)
+		return
+	}
+	if result.RowsAffected > 0 {
+		ctx.JSON(200, cn.responser.ResponseOne(200, body))
+		return
+	}
+}
+
+func (cn *crudNest[TParent, TChild]) readMany(ctx *gin.Context) {}
+
+func (cn *crudNest[TParent, TChild]) readOne(ctx *gin.Context) {
+	id, err := GetIntPathParam[int64](ctx, cn.idparamname)
+	if err != nil {
+		errBody := cn.errResponser.Match(err)
+		ctx.JSON(400, errBody)
+		return
+	}
+	var object TParent
+	result := cn.model.First(&object, id)
+	if result.Error != nil {
+		errBody := cn.errResponser.Match(result.Error)
+		ctx.JSON(int(errBody.Status), errBody)
+		return
+	}
+	ctx.JSON(200, cn.responser.ResponseOne(200, object))
+	return
+}
+
+func (cn *crudNest[TParent, TChild]) updateOne(ctx *gin.Context) {}
+func (cn *crudNest[TParent, TChild]) deleteOne(ctx *gin.Context) {}
+
+func (c *crudNest[TParent, TChild]) Migrate() error {
+	migrator := c.db.Migrator()
+	return migrator.AutoMigrate(&c.stub, &c.stubC)
+
+}
